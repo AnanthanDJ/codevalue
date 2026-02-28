@@ -58,6 +58,9 @@ export default function OrgOnboardPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
+    <Link href="/org/dashboard" className="text-violet-400 text-sm underline mb-6 inline-block">
+  ← Back to Dashboard
+</Link>
       <div className="w-full max-w-lg">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">

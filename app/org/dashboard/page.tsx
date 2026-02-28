@@ -74,17 +74,19 @@ export default function OrgDashboard() {
         return;
       }
 
-      // Get org record
       const { data: orgData } = await supabase
         .from("orgs")
         .select("*")
         .eq("user_id", user.id)
         .single();
 
-      if (!orgData) { router.push("/org/onboard"); return; }
+      if (!orgData) {
+        setLoading(false);
+        return;
+      }
+
       setOrg(orgData);
 
-      // Get all findings for this org
       const { data: findingsData } = await supabase
         .from("findings")
         .select("*")
@@ -93,7 +95,6 @@ export default function OrgDashboard() {
 
       setFindings(findingsData ?? []);
 
-      // Get all claims on this org's findings with engineer profiles
       const { data: claimsData } = await supabase
         .from("claims")
         .select(`
@@ -121,9 +122,9 @@ export default function OrgDashboard() {
   }, []);
 
   async function handleLogout() {
-  await supabase.auth.signOut();
-  router.push("/");
-}
+    await supabase.auth.signOut();
+    router.push("/");
+  }
 
   async function handleAcknowledge(claimId: string, findingId: string) {
     setAcknowledging(claimId);
@@ -133,13 +134,9 @@ export default function OrgDashboard() {
         .from("claims")
         .update({ org_acknowledged: true })
         .eq("id", claimId);
-
       if (ackError) throw ackError;
-
       setClaims((prev) =>
-        prev.map((c) =>
-          c.id === claimId ? { ...c, org_acknowledged: true } : c
-        )
+        prev.map((c) => c.id === claimId ? { ...c, org_acknowledged: true } : c)
       );
     } catch (err: any) {
       setError(err.message);
@@ -156,6 +153,35 @@ export default function OrgDashboard() {
     );
   }
 
+  // No repo connected yet
+  if (!org) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
+        <div className="text-center max-w-md">
+          <div className="text-5xl mb-4">🏢</div>
+          <h2 className="text-2xl font-bold mb-2">No repo connected yet</h2>
+          <p className="text-gray-400 text-sm mb-8">
+            Connect your repository to start finding inefficiencies your team never knew existed.
+          </p>
+          <div className="flex items-center justify-center gap-4">
+            <button
+              onClick={handleLogout}
+              className="text-gray-500 text-sm underline"
+            >
+              Log out
+            </button>
+            <Link
+              href="/org/onboard"
+              className="bg-violet-600 hover:bg-violet-500 px-6 py-3 rounded-xl text-sm font-semibold transition"
+            >
+              Connect Repository →
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   const openFindings = findings.filter((f) => f.status === "open");
   const claimedFindings = findings.filter((f) => f.status === "claimed");
   const resolvedFindings = findings.filter((f) => f.status === "resolved");
@@ -167,19 +193,29 @@ export default function OrgDashboard() {
       <div className="max-w-3xl mx-auto">
 
         {/* Header */}
-        <div className="mb-10">
-          <h1 className="text-3xl font-bold mb-1">
-            Code<span className="text-violet-400">Value</span>
-          </h1>
-          <p className="text-gray-400 text-sm">{org?.name} — Org Dashboard</p>
-          <p className="text-gray-600 text-xs font-mono mt-1">{org?.repo_url}</p>
+        <div className="flex items-start justify-between mb-10">
+          <div>
+            <h1 className="text-3xl font-bold mb-1">
+              Code<span className="text-violet-400">Value</span>
+            </h1>
+            <p className="text-gray-400 text-sm">{org?.name} — Org Dashboard</p>
+            <p className="text-gray-600 text-xs font-mono mt-1">{org?.repo_url}</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/org/onboard"
+              className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-sm transition"
+            >
+              + Connect Repo
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
+            >
+              Log out
+            </button>
+          </div>
         </div>
-        <button
-    onClick={handleLogout}
-    className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
-  >
-    Log out
-  </button>
 
         {error && (
           <div className="bg-red-900 border border-red-700 rounded-xl px-4 py-3 text-sm text-red-300 mb-6">
@@ -232,7 +268,7 @@ export default function OrgDashboard() {
                     </span>
                   </div>
 
-                  {/* Staged reveal — blurred until acknowledged */}
+                  {/* Staged reveal */}
                   <div className="relative mb-4">
                     <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
                       {c.findings.description}
@@ -245,10 +281,7 @@ export default function OrgDashboard() {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <Link
-                      href={`/profile/${c.profiles?.id}`}
-                      className="text-violet-400 text-sm underline"
-                    >
+                    <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
                       View Engineer: {c.profiles?.name}
                     </Link>
                     <button
@@ -290,10 +323,7 @@ export default function OrgDashboard() {
                     📈 <span className="text-white font-medium">Impact:</span> {c.findings.estimated_impact}
                   </div>
                   <p className="text-gray-600 text-xs font-mono mb-3">{c.findings.file}</p>
-                  <Link
-                    href={`/profile/${c.profiles?.id}`}
-                    className="text-violet-400 text-sm underline"
-                  >
+                  <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
                     Engineer: {c.profiles?.name} →
                   </Link>
                 </div>
