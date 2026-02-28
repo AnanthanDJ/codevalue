@@ -63,6 +63,15 @@ export default function OrgDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/login"); return; }
 
+      const { data: orgData } = await supabase
+  .from("orgs")
+  .select("*")
+  .eq("user_id", user.id)
+  .maybeSingle();
+
+console.log("USER ID:", user.id);
+console.log("ORG DATA:", orgData);
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("*")
