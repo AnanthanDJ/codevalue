@@ -13,76 +13,45 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleSignIn() {
-    setLoading(true);
-    setError("");
-    try {
-      // Check if user exists in profiles
-      const { data: { user }, error: signInError } = await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: false },
-      });
-
-      if (signInError) throw new Error("No account found with this email. Please sign up first.");
-
-      // Poll for session since email confirm is off
-      let attempts = 0;
-      const interval = setInterval(async () => {
-        attempts++;
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          clearInterval(interval);
-          router.push("/go");
-        }
-        if (attempts > 10) clearInterval(interval);
-      }, 500);
-
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
- async function handleSignUp() {
+ async function handleSignIn() {
   setLoading(true);
   setError("");
   try {
-    const { data, error: signUpError } = await supabase.auth.signUp({
+    const { data: linkData, error } = await supabase.auth.signInWithOtp({
       email,
-      password: Math.random().toString(36).slice(-12),
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: `${location.origin}/auth/callback`,
+      },
     });
 
-    if (signUpError) throw signUpError;
-    if (!data.user) throw new Error("Signup failed");
+    if (error) throw new Error("No account found. Please sign up first.");
 
-    // Create profile via server route to bypass RLS
+    setError("Check your email for a sign in link.");
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function handleSignUp() {
+  setLoading(true);
+  setError("");
+  try {
     const res = await fetch("/api/create-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: data.user.id, role, name }),
+      body: JSON.stringify({ email, role, name }),
     });
 
     const json = await res.json();
     if (json.error) throw new Error(json.error);
 
-    // Sign in immediately
-    await supabase.auth.signInWithOtp({
-      email,
-      options: { shouldCreateUser: false },
-    });
-
-    let attempts = 0;
-    const interval = setInterval(async () => {
-      attempts++;
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        clearInterval(interval);
-        router.push(role === "org" ? "/org/onboard" : "/dashboard");
-      }
-      if (attempts > 10) clearInterval(interval);
-    }, 500);
-
+    // Redirect to magic link directly — no email needed
+    if (json.magicLink) {
+      window.location.href = json.magicLink;
+    }
   } catch (err: any) {
     setError(err.message);
   } finally {
