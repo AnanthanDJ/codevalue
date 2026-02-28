@@ -86,6 +86,7 @@ export default function OrgDashboard() {
       }
 
       setOrg(orgData);
+      console.log("Org loaded:", orgData.id);
 
       const { data: findingsData } = await supabase
         .from("findings")
@@ -94,30 +95,38 @@ export default function OrgDashboard() {
         .order("created_at", { ascending: false });
 
       setFindings(findingsData ?? []);
+      console.log("Findings loaded:", findingsData?.length);
 
-      const { data: claimsData } = await supabase
-        .from("claims")
-        .select(`
-          id,
-          org_acknowledged,
-          created_at,
-          engineer_id,
-          findings!inner (
-            id, title, category, description,
-            estimated_earnings, estimated_impact,
-            file, difficulty, status,
-            org_id
-          ),
-          profiles (
-            id, name
-          )
-        `)
-        .eq("findings.org_id", orgData.id)
-        .order("created_at", { ascending: false });
+       // Get finding IDs for this org first
+const { data: orgFindingIds } = await supabase
+  .from("findings")
+  .select("id")
+  .eq("org_id", orgData.id);
 
-      setClaims((claimsData as any) ?? []);
-      setLoading(false);
-    }
+const ids = (orgFindingIds ?? []).map((f) => f.id);
+
+if (ids.length > 0) {
+  const { data: claimsData } = await supabase
+    .from("claims")
+    .select(`
+      id,
+      org_acknowledged,
+      created_at,
+      engineer_id,
+      findings (
+        id, title, category, description,
+        estimated_earnings, estimated_impact,
+        file, difficulty, status
+      ),
+      profiles (
+        id, name
+      )
+    `)
+    .in("finding_id", ids)
+    .order("created_at", { ascending: false });
+
+  setClaims((claimsData as any) ?? []);
+}   }
     load();
   }, []);
 
