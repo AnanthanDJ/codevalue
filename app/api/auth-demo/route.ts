@@ -25,10 +25,10 @@ export async function POST(req: NextRequest) {
 
     if (!user) throw new Error("Could not create user");
 
-    // Upsert profile — if exists keep it, if new create it
+    // Upsert profile
     const { data: existingProfile } = await supabaseAdmin
       .from("profiles")
-      .select("id")
+      .select("id, role")
       .eq("id", user.id)
       .single();
 
@@ -36,17 +36,21 @@ export async function POST(req: NextRequest) {
       await supabaseAdmin.from("profiles").insert({ id: user.id, role, name });
     }
 
-    // Generate magic link
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
-    const { data: linkData, error: linkError } = await supabaseAdmin.auth.admin.generateLink({
-      type: "magiclink",
-      email,
-      options: { redirectTo: `${siteUrl}/auth/callback` },
+    // Create session directly
+    const { data: sessionData, error: sessionError } = await supabaseAdmin.auth.admin.createSession({
+      user_id: user.id,  
     });
 
-    if (linkError) throw linkError;
+    if (sessionError) throw sessionError;
 
-    return NextResponse.json({ magicLink: linkData.properties?.action_link });
+    const profileRole = existingProfile?.role ?? role;
+    const redirect = profileRole === "org" ? "/org/dashboard" : "/dashboard";
+
+    return NextResponse.json({
+      access_token: sessionData.session.access_token,
+      refresh_token: sessionData.session.refresh_token,
+      redirect,
+    });
   } catch (err: any) {
     console.error(err);
     return NextResponse.json({ error: err.message }, { status: 500 });

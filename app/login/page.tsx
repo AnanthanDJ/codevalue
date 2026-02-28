@@ -11,24 +11,37 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleContinue() {
-    setLoading(true);
-    setError("");
-    try {
-      const res = await fetch("/api/auth-demo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, role, name }),
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      window.location.href = json.magicLink;
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+ async function handleContinue() {
+  setLoading(true);
+  setError("");
+  try {
+    const res = await fetch("/api/auth-demo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role, name }),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+
+    // Set session directly in the client
+    const { createBrowserClient } = await import("@supabase/ssr");
+    const supabase = createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    await supabase.auth.setSession({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+    });
+
+    window.location.href = json.redirect;
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
