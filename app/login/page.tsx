@@ -44,54 +44,51 @@ export default function LoginPage() {
     }
   }
 
-  async function handleSignUp() {
-    setLoading(true);
-    setError("");
-    try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password: Math.random().toString(36).slice(-12), // random password, magic link only
-        options: {
-          emailRedirectTo: `${location.origin}/auth/callback`,
-        },
-      });
+ async function handleSignUp() {
+  setLoading(true);
+  setError("");
+  try {
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password: Math.random().toString(36).slice(-12),
+    });
 
-      if (signUpError) throw signUpError;
-      if (!data.user) throw new Error("Signup failed");
+    if (signUpError) throw signUpError;
+    if (!data.user) throw new Error("Signup failed");
 
-      // Create profile immediately
-      const { error: profileError } = await supabase.from("profiles").insert({
-        id: data.user.id,
-        role,
-        name,
-      });
+    // Create profile via server route to bypass RLS
+    const res = await fetch("/api/create-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: data.user.id, role, name }),
+    });
 
-      if (profileError && profileError.code !== "23505") throw profileError;
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
 
-      // Sign them in
-      await supabase.auth.signInWithOtp({
-        email,
-        options: { shouldCreateUser: false },
-      });
+    // Sign in immediately
+    await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false },
+    });
 
-      // Wait for session
-      let attempts = 0;
-      const interval = setInterval(async () => {
-        attempts++;
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          clearInterval(interval);
-          router.push(role === "org" ? "/org/onboard" : "/dashboard");
-        }
-        if (attempts > 10) clearInterval(interval);
-      }, 500);
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        clearInterval(interval);
+        router.push(role === "org" ? "/org/onboard" : "/dashboard");
+      }
+      if (attempts > 10) clearInterval(interval);
+    }, 500);
 
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  } catch (err: any) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
   }
+}
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
