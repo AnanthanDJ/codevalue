@@ -55,83 +55,97 @@ export default function OrgDashboard() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState<string>("");
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.push("/login"); return; }
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { router.push("/login"); return; }
 
-      console.log("USER ID:", user.id);
+        setDebugInfo(`User: ${user.id}`);
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .maybeSingle();
 
-      if (!profile || profile.role !== "org") {
-        router.push("/dashboard");
-        return;
-      }
+        setDebugInfo(prev => prev + ` | Profile: ${JSON.stringify(profile)} | ProfileErr: ${profileError?.message}`);
 
-      const { data: orgData } = await supabase
-        .from("orgs")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
+        if (!profile) {
+          setDebugInfo(prev => prev + " | NO PROFILE FOUND");
+          setLoading(false);
+          return;
+        }
 
-      console.log("ORG DATA:", orgData);
+        if (profile.role !== "org") {
+          setDebugInfo(prev => prev + ` | Wrong role: ${profile.role}, redirecting`);
+          router.push("/dashboard");
+          return;
+        }
 
-      if (!orgData) {
-        setLoading(false);
-        return;
-      }
+        const { data: orgData, error: orgError } = await supabase
+          .from("orgs")
+          .select("*")
+          .eq("user_id", user.id)
+          .maybeSingle();
 
-      setOrg(orgData);
+        setDebugInfo(prev => prev + ` | Org: ${JSON.stringify(orgData)} | OrgErr: ${orgError?.message}`);
 
-      const { data: findingsData } = await supabase
-        .from("findings")
-        .select("*")
-        .eq("org_id", orgData.id)
-        .order("created_at", { ascending: false });
+        if (!orgData) {
+          setLoading(false);
+          return;
+        }
 
-      console.log("FINDINGS:", findingsData);
-      setFindings(findingsData ?? []);
+        setOrg(orgData);
 
-      const { data: orgFindingIds } = await supabase
-        .from("findings")
-        .select("id")
-        .eq("org_id", orgData.id);
-
-      const ids = (orgFindingIds ?? []).map((f) => f.id);
-
-      if (ids.length > 0) {
-        const { data: claimsData } = await supabase
-          .from("claims")
-          .select(`
-            id,
-            org_acknowledged,
-            created_at,
-            engineer_id,
-            findings (
-              id, title, category, description,
-              estimated_earnings, estimated_impact,
-              file, difficulty, status
-            ),
-            profiles (
-              id, name
-            )
-          `)
-          .in("finding_id", ids)
+        const { data: findingsData, error: findingsError } = await supabase
+          .from("findings")
+          .select("*")
+          .eq("org_id", orgData.id)
           .order("created_at", { ascending: false });
 
-        console.log("CLAIMS:", claimsData);
-        setClaims((claimsData as any) ?? []);
-      }
+        setDebugInfo(prev => prev + ` | Findings: ${findingsData?.length} | FindingsErr: ${findingsError?.message}`);
+        setFindings(findingsData ?? []);
 
-      setLoading(false);
+        const { data: orgFindingIds } = await supabase
+          .from("findings")
+          .select("id")
+          .eq("org_id", orgData.id);
+
+        const ids = (orgFindingIds ?? []).map((f) => f.id);
+
+        if (ids.length > 0) {
+          const { data: claimsData, error: claimsError } = await supabase
+            .from("claims")
+            .select(`
+              id,
+              org_acknowledged,
+              created_at,
+              engineer_id,
+              findings (
+                id, title, category, description,
+                estimated_earnings, estimated_impact,
+                file, difficulty, status
+              ),
+              profiles (
+                id, name
+              )
+            `)
+            .in("finding_id", ids)
+            .order("created_at", { ascending: false });
+
+          setDebugInfo(prev => prev + ` | Claims: ${claimsData?.length} | ClaimsErr: ${claimsError?.message}`);
+          setClaims((claimsData as any) ?? []);
+        }
+      } catch (err: any) {
+        setDebugInfo(prev => prev + ` | EXCEPTION: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
     }
     load();
   }, []);
@@ -141,7 +155,7 @@ export default function OrgDashboard() {
     router.push("/");
   }
 
-  async function handleAcknowledge(claimId: string, findingId: string) {
+  async function handleAcknowledge(claimId: string) {
     setAcknowledging(claimId);
     setError("");
     try {
@@ -174,9 +188,11 @@ export default function OrgDashboard() {
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">🏢</div>
           <h2 className="text-2xl font-bold mb-2">No repo connected yet</h2>
-          <p className="text-gray-400 text-sm mb-8">
-            Connect your repository to start finding inefficiencies your team never knew existed.
+          <p className="text-gray-400 text-sm mb-4">
+            Connect your repository to start finding inefficiencies.
           </p>
+          {/* Debug info */}
+          <p className="text-gray-600 text-xs mb-8 font-mono break-all">{debugInfo}</p>
           <div className="flex items-center justify-center gap-4">
             <button onClick={handleLogout} className="text-gray-500 text-sm underline">
               Log out
@@ -203,14 +219,13 @@ export default function OrgDashboard() {
     <main className="min-h-screen bg-gray-950 text-white px-6 py-12">
       <div className="max-w-3xl mx-auto">
 
-        {/* Header */}
         <div className="flex items-start justify-between mb-10">
           <div>
             <h1 className="text-3xl font-bold mb-1">
               Code<span className="text-violet-400">Value</span>
             </h1>
-            <p className="text-gray-400 text-sm">{org?.name} — Org Dashboard</p>
-            <p className="text-gray-600 text-xs font-mono mt-1">{org?.repo_url}</p>
+            <p className="text-gray-400 text-sm">{org.name} — Org Dashboard</p>
+            <p className="text-gray-600 text-xs font-mono mt-1">{org.repo_url}</p>
           </div>
           <div className="flex items-center gap-3">
             <Link
@@ -234,7 +249,6 @@ export default function OrgDashboard() {
           </div>
         )}
 
-        {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-10">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-violet-400">{openFindings.length}</div>
@@ -250,15 +264,11 @@ export default function OrgDashboard() {
           </div>
         </div>
 
-        {/* Pending Acknowledgements */}
         {pendingClaims.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-yellow-400">
               ⏳ Pending Acknowledgement ({pendingClaims.length})
             </h2>
-            <p className="text-gray-500 text-sm mb-4">
-              An engineer has claimed a finding. Acknowledge to unlock full details and begin work.
-            </p>
             <div className="space-y-4">
               {pendingClaims.map((c) => (
                 <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
@@ -278,7 +288,6 @@ export default function OrgDashboard() {
                       {c.findings.estimated_earnings}/mo
                     </span>
                   </div>
-
                   <div className="relative mb-4">
                     <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
                       {c.findings.description}
@@ -289,13 +298,12 @@ export default function OrgDashboard() {
                       </span>
                     </div>
                   </div>
-
                   <div className="flex items-center justify-between">
                     <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
                       View Engineer: {c.profiles?.name}
                     </Link>
                     <button
-                      onClick={() => handleAcknowledge(c.id, c.findings.id)}
+                      onClick={() => handleAcknowledge(c.id)}
                       disabled={acknowledging === c.id}
                       className="bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
                     >
@@ -308,7 +316,6 @@ export default function OrgDashboard() {
           </div>
         )}
 
-        {/* Acknowledged Claims */}
         {acknowledgedClaims.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-green-400">
@@ -342,7 +349,6 @@ export default function OrgDashboard() {
           </div>
         )}
 
-        {/* All Findings */}
         <div>
           <h2 className="text-lg font-semibold mb-3 text-gray-200">All Findings</h2>
           {findings.length === 0 ? (
