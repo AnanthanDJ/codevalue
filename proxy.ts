@@ -31,7 +31,7 @@ export async function proxy(req: NextRequest) {
 
   // Already logged in — redirect away from login
   if (pathname === "/login" && user) {
-    return NextResponse.redirect(new URL("/redirect", req.url));
+    return NextResponse.redirect(new URL("/go", req.url));
   }
 
   return res;
