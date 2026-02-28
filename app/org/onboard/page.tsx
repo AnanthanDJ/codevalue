@@ -48,7 +48,7 @@ export default function OrgOnboardPage() {
       const scanData = await scanRes.json();
       if (scanData.error) throw new Error(scanData.error);
 
-      router.push("/org/dashboard");
+      window.location.href = "/org/dashboard";
     } catch (err: any) {
       setError(err.message);
     } finally {
