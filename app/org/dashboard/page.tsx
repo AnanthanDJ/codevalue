@@ -67,7 +67,7 @@ export default function OrgDashboard() {
         .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!profile || profile.role !== "org") {
         router.push("/dashboard");
@@ -78,7 +78,7 @@ export default function OrgDashboard() {
         .from("orgs")
         .select("*")
         .eq("user_id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!orgData) {
         setLoading(false);
