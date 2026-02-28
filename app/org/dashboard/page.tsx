@@ -120,6 +120,11 @@ export default function OrgDashboard() {
     load();
   }, []);
 
+  async function handleLogout() {
+  await supabase.auth.signOut();
+  router.push("/");
+}
+
   async function handleAcknowledge(claimId: string, findingId: string) {
     setAcknowledging(claimId);
     setError("");
@@ -169,6 +174,12 @@ export default function OrgDashboard() {
           <p className="text-gray-400 text-sm">{org?.name} — Org Dashboard</p>
           <p className="text-gray-600 text-xs font-mono mt-1">{org?.repo_url}</p>
         </div>
+        <button
+    onClick={handleLogout}
+    className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
+  >
+    Log out
+  </button>
 
         {error && (
           <div className="bg-red-900 border border-red-700 rounded-xl px-4 py-3 text-sm text-red-300 mb-6">

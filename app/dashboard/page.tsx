@@ -76,6 +76,12 @@ export default function DashboardPage() {
     load();
   }, []);
 
+  async function handleLogout() {
+  await supabase.auth.signOut();
+  router.push("/");
+}
+
+
   async function handleClaim(findingId: string) {
     setClaiming(findingId);
     setError("");
@@ -135,6 +141,12 @@ export default function DashboardPage() {
           >
             My Profile →
           </Link>
+          <button
+    onClick={handleLogout}
+    className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
+  >
+    Log out
+  </button>
         </div>
 
         {error && (
