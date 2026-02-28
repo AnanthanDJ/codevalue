@@ -129,6 +129,7 @@ export default function OrgOnboardPage() {
             className="w-full bg-violet-600 hover:bg-violet-500 disabled:opacity-50 py-3 rounded-xl text-sm font-semibold transition"
           >
             {loading ? "Scanning repository..." : "Connect & Scan"}
+            {error && <p className="text-red-400 text-sm">{error}</p>}
           </button>
         </div>
       </div>
