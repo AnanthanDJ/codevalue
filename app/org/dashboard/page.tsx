@@ -71,10 +71,7 @@ export default function OrgDashboard() {
           .from("profiles")
           .select("*")
           .eq("id", user.id)
-          .limit(1);
-
-          
-const profile = profileData?.[0] ?? null;
+          .maybeSingle();
 
         setDebugInfo(prev => prev + ` | Profile: ${JSON.stringify(profile)} | ProfileErr: ${profileError?.message}`);
 
