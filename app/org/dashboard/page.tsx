@@ -71,7 +71,7 @@ export default function OrgDashboard() {
           .from("profiles")
           .select("*")
           .eq("id", user.id)
-          .maybeSingle();
+          .limit(1);
 
         setDebugInfo(prev => prev + ` | Profile: ${JSON.stringify(profile)} | ProfileErr: ${profileError?.message}`);
 
@@ -91,7 +91,7 @@ export default function OrgDashboard() {
           .from("orgs")
           .select("*")
           .eq("user_id", user.id)
-          .maybeSingle();
+          .limit(1);
 
         setDebugInfo(prev => prev + ` | Org: ${JSON.stringify(orgData)} | OrgErr: ${orgError?.message}`);
 
