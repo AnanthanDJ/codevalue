@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function OnboardPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const role = (searchParams.get("role") ?? "engineer") as "engineer" | "org";
+  const [role, setRole] = useState<"engineer" | "org">("engineer");
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -22,20 +21,38 @@ export default function OnboardPage() {
       name,
     });
 
-    if (role === "org") {
-      router.push("/org/onboard");
-    } else {
-      router.push("/dashboard");
-    }
+    router.push(role === "org" ? "/org/onboard" : "/dashboard");
   }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
       <div className="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl p-8">
         <h2 className="text-2xl font-bold mb-1">Welcome aboard</h2>
-        <p className="text-gray-400 text-sm mb-6">
-          You're joining as a{role === "org" ? "n organisation" : "n engineer"}
-        </p>
+        <p className="text-gray-400 text-sm mb-6">Tell us who you are</p>
+
+        {/* Role selector */}
+        <div className="flex rounded-xl overflow-hidden border border-gray-700 mb-6">
+          <button
+            onClick={() => setRole("engineer")}
+            className={`flex-1 py-3 text-sm font-medium transition ${
+              role === "engineer"
+                ? "bg-violet-600 text-white"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            I'm an Engineer
+          </button>
+          <button
+            onClick={() => setRole("org")}
+            className={`flex-1 py-3 text-sm font-medium transition ${
+              role === "org"
+                ? "bg-violet-600 text-white"
+                : "text-gray-400 hover:text-white"
+            }`}
+          >
+            I'm an Organisation
+          </button>
+        </div>
 
         <label className="block text-sm text-gray-400 mb-2">
           {role === "org" ? "Organisation name" : "Your name"}
