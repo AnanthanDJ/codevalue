@@ -63,14 +63,7 @@ export default function OrgDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/login"); return; }
 
-      const { data: orgData } = await supabase
-  .from("orgs")
-  .select("*")
-  .eq("user_id", user.id)
-  .maybeSingle();
-
-console.log("USER ID:", user.id);
-console.log("ORG DATA:", orgData);
+      console.log("USER ID:", user.id);
 
       const { data: profile } = await supabase
         .from("profiles")
@@ -89,13 +82,14 @@ console.log("ORG DATA:", orgData);
         .eq("user_id", user.id)
         .maybeSingle();
 
+      console.log("ORG DATA:", orgData);
+
       if (!orgData) {
         setLoading(false);
         return;
       }
 
       setOrg(orgData);
-      console.log("Org loaded:", orgData.id);
 
       const { data: findingsData } = await supabase
         .from("findings")
@@ -103,39 +97,42 @@ console.log("ORG DATA:", orgData);
         .eq("org_id", orgData.id)
         .order("created_at", { ascending: false });
 
+      console.log("FINDINGS:", findingsData);
       setFindings(findingsData ?? []);
-      console.log("Findings loaded:", findingsData?.length);
 
-       // Get finding IDs for this org first
-const { data: orgFindingIds } = await supabase
-  .from("findings")
-  .select("id")
-  .eq("org_id", orgData.id);
+      const { data: orgFindingIds } = await supabase
+        .from("findings")
+        .select("id")
+        .eq("org_id", orgData.id);
 
-const ids = (orgFindingIds ?? []).map((f) => f.id);
+      const ids = (orgFindingIds ?? []).map((f) => f.id);
 
-if (ids.length > 0) {
-  const { data: claimsData } = await supabase
-    .from("claims")
-    .select(`
-      id,
-      org_acknowledged,
-      created_at,
-      engineer_id,
-      findings (
-        id, title, category, description,
-        estimated_earnings, estimated_impact,
-        file, difficulty, status
-      ),
-      profiles (
-        id, name
-      )
-    `)
-    .in("finding_id", ids)
-    .order("created_at", { ascending: false });
+      if (ids.length > 0) {
+        const { data: claimsData } = await supabase
+          .from("claims")
+          .select(`
+            id,
+            org_acknowledged,
+            created_at,
+            engineer_id,
+            findings (
+              id, title, category, description,
+              estimated_earnings, estimated_impact,
+              file, difficulty, status
+            ),
+            profiles (
+              id, name
+            )
+          `)
+          .in("finding_id", ids)
+          .order("created_at", { ascending: false });
 
-  setClaims((claimsData as any) ?? []);
-}   }
+        console.log("CLAIMS:", claimsData);
+        setClaims((claimsData as any) ?? []);
+      }
+
+      setLoading(false);
+    }
     load();
   }, []);
 
@@ -171,7 +168,6 @@ if (ids.length > 0) {
     );
   }
 
-  // No repo connected yet
   if (!org) {
     return (
       <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
@@ -182,10 +178,7 @@ if (ids.length > 0) {
             Connect your repository to start finding inefficiencies your team never knew existed.
           </p>
           <div className="flex items-center justify-center gap-4">
-            <button
-              onClick={handleLogout}
-              className="text-gray-500 text-sm underline"
-            >
+            <button onClick={handleLogout} className="text-gray-500 text-sm underline">
               Log out
             </button>
             <Link
@@ -286,7 +279,6 @@ if (ids.length > 0) {
                     </span>
                   </div>
 
-                  {/* Staged reveal */}
                   <div className="relative mb-4">
                     <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
                       {c.findings.description}
