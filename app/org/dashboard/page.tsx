@@ -65,61 +65,47 @@ export default function OrgDashboard() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { router.push("/login"); return; }
 
-        setDebugInfo(`User: ${user.id}`);
-
-        const { data: profile, error: profileError } = await supabase
+        // Check profile
+        const { data: profiles } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", user.id)
-          .maybeSingle();
+          .limit(1);
 
-        setDebugInfo(prev => prev + ` | Profile: ${JSON.stringify(profile)} | ProfileErr: ${profileError?.message}`);
+        const profile = profiles?.[0] ?? null;
+        setDebugInfo(`User: ${user.id} | Role: ${profile?.role}`);
 
-        if (!profile) {
-          setDebugInfo(prev => prev + " | NO PROFILE FOUND");
-          setLoading(false);
-          return;
-        }
+        if (!profile) { setLoading(false); return; }
+        if (profile.role !== "org") { router.push("/dashboard"); return; }
 
-        if (profile.role !== "org") {
-          setDebugInfo(prev => prev + ` | Wrong role: ${profile.role}, redirecting`);
-          router.push("/dashboard");
-          return;
-        }
-
-        const { data: orgData, error: orgError } = await supabase
+        // Get org
+        const { data: orgs } = await supabase
           .from("orgs")
           .select("*")
           .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
           .limit(1);
 
-        setDebugInfo(prev => prev + ` | Org: ${JSON.stringify(orgData)} | OrgErr: ${orgError?.message}`);
+        const orgRow = orgs?.[0] ?? null;
+        setDebugInfo(prev => prev + ` | Org: ${orgRow?.id ?? "null"}`);
 
-        if (!orgData) {
-          setLoading(false);
-          return;
-        }
+        if (!orgRow) { setLoading(false); return; }
+        setOrg(orgRow);
 
-        setOrg(orgData);
-
-        const { data: findingsData, error: findingsError } = await supabase
+        // Get findings
+        const { data: findingsData } = await supabase
           .from("findings")
           .select("*")
-          .eq("org_id", orgData.id)
+          .eq("org_id", orgRow.id)
           .order("created_at", { ascending: false });
 
-        setDebugInfo(prev => prev + ` | Findings: ${findingsData?.length} | FindingsErr: ${findingsError?.message}`);
+        setDebugInfo(prev => prev + ` | Findings: ${findingsData?.length ?? 0}`);
         setFindings(findingsData ?? []);
 
-        const { data: orgFindingIds } = await supabase
-          .from("findings")
-          .select("id")
-          .eq("org_id", orgData.id);
-
-        const ids = (orgFindingIds ?? []).map((f) => f.id);
-
+        // Get claims
+        const ids = (findingsData ?? []).map((f: any) => f.id);
         if (ids.length > 0) {
-          const { data: claimsData, error: claimsError } = await supabase
+          const { data: claimsData } = await supabase
             .from("claims")
             .select(`
               id,
@@ -138,11 +124,11 @@ export default function OrgDashboard() {
             .in("finding_id", ids)
             .order("created_at", { ascending: false });
 
-          setDebugInfo(prev => prev + ` | Claims: ${claimsData?.length} | ClaimsErr: ${claimsError?.message}`);
+          setDebugInfo(prev => prev + ` | Claims: ${claimsData?.length ?? 0}`);
           setClaims((claimsData as any) ?? []);
         }
       } catch (err: any) {
-        setDebugInfo(prev => prev + ` | EXCEPTION: ${err.message}`);
+        setDebugInfo(prev => prev + ` | ERROR: ${err.message}`);
       } finally {
         setLoading(false);
       }
@@ -188,19 +174,11 @@ export default function OrgDashboard() {
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">🏢</div>
           <h2 className="text-2xl font-bold mb-2">No repo connected yet</h2>
-          <p className="text-gray-400 text-sm mb-4">
-            Connect your repository to start finding inefficiencies.
-          </p>
-          {/* Debug info */}
+          <p className="text-gray-400 text-sm mb-4">Connect your repository to get started.</p>
           <p className="text-gray-600 text-xs mb-8 font-mono break-all">{debugInfo}</p>
           <div className="flex items-center justify-center gap-4">
-            <button onClick={handleLogout} className="text-gray-500 text-sm underline">
-              Log out
-            </button>
-            <Link
-              href="/org/onboard"
-              className="bg-violet-600 hover:bg-violet-500 px-6 py-3 rounded-xl text-sm font-semibold transition"
-            >
+            <button onClick={handleLogout} className="text-gray-500 text-sm underline">Log out</button>
+            <Link href="/org/onboard" className="bg-violet-600 hover:bg-violet-500 px-6 py-3 rounded-xl text-sm font-semibold transition">
               Connect Repository →
             </Link>
           </div>
@@ -221,32 +199,22 @@ export default function OrgDashboard() {
 
         <div className="flex items-start justify-between mb-10">
           <div>
-            <h1 className="text-3xl font-bold mb-1">
-              Code<span className="text-violet-400">Value</span>
-            </h1>
+            <h1 className="text-3xl font-bold mb-1">Code<span className="text-violet-400">Value</span></h1>
             <p className="text-gray-400 text-sm">{org.name} — Org Dashboard</p>
             <p className="text-gray-600 text-xs font-mono mt-1">{org.repo_url}</p>
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              href="/org/onboard"
-              className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-sm transition"
-            >
+            <Link href="/org/onboard" className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-sm transition">
               + Connect Repo
             </Link>
-            <button
-              onClick={handleLogout}
-              className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
-            >
+            <button onClick={handleLogout} className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300">
               Log out
             </button>
           </div>
         </div>
 
         {error && (
-          <div className="bg-red-900 border border-red-700 rounded-xl px-4 py-3 text-sm text-red-300 mb-6">
-            {error}
-          </div>
+          <div className="bg-red-900 border border-red-700 rounded-xl px-4 py-3 text-sm text-red-300 mb-6">{error}</div>
         )}
 
         <div className="grid grid-cols-3 gap-4 mb-10">
@@ -266,9 +234,8 @@ export default function OrgDashboard() {
 
         {pendingClaims.length > 0 && (
           <div className="mb-10">
-            <h2 className="text-lg font-semibold mb-3 text-yellow-400">
-              ⏳ Pending Acknowledgement ({pendingClaims.length})
-            </h2>
+            <h2 className="text-lg font-semibold mb-3 text-yellow-400">⏳ Pending Acknowledgement ({pendingClaims.length})</h2>
+            <p className="text-gray-500 text-sm mb-4">An engineer has claimed a finding. Acknowledge to unlock full details.</p>
             <div className="space-y-4">
               {pendingClaims.map((c) => (
                 <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
@@ -284,9 +251,7 @@ export default function OrgDashboard() {
                       </div>
                       <h3 className="text-white font-semibold">{c.findings.title}</h3>
                     </div>
-                    <span className="text-violet-400 font-bold shrink-0">
-                      {c.findings.estimated_earnings}/mo
-                    </span>
+                    <span className="text-violet-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
                   </div>
                   <div className="relative mb-4">
                     <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
@@ -318,9 +283,7 @@ export default function OrgDashboard() {
 
         {acknowledgedClaims.length > 0 && (
           <div className="mb-10">
-            <h2 className="text-lg font-semibold mb-3 text-green-400">
-              ✓ Acknowledged & In Progress ({acknowledgedClaims.length})
-            </h2>
+            <h2 className="text-lg font-semibold mb-3 text-green-400">✓ Acknowledged & In Progress ({acknowledgedClaims.length})</h2>
             <div className="space-y-4">
               {acknowledgedClaims.map((c) => (
                 <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-6">
@@ -331,9 +294,7 @@ export default function OrgDashboard() {
                       </span>
                       <h3 className="text-white font-semibold mt-1">{c.findings.title}</h3>
                     </div>
-                    <span className="text-violet-400 font-bold shrink-0">
-                      {c.findings.estimated_earnings}/mo
-                    </span>
+                    <span className="text-violet-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
                   </div>
                   <p className="text-gray-400 text-sm mb-2">{c.findings.description}</p>
                   <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
