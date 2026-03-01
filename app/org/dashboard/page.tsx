@@ -11,6 +11,10 @@ type Claim = {
   created_at: string;
   engineer_id: string;
   agreed_metric?: string;
+  status?: string;
+  submission_notes?: string;
+  verified_monthly_savings?: number;
+  audit_notes?: string;
   findings: {
     id: string;
     title: string;
@@ -50,13 +54,6 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   Hard: "text-red-400",
 };
 
-function platformCut(earnings: string) {
-  const num = parseInt(earnings.replace(/\D/g, "")) || 0;
-  const engineerCut = Math.round(num * 0.8);
-  const platformFee = Math.round(num * 0.2);
-  return { engineerCut, platformFee };
-}
-
 export default function OrgDashboard() {
   const router = useRouter();
   const [org, setOrg] = useState<any>(null);
@@ -64,7 +61,9 @@ export default function OrgDashboard() {
   const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
-  const [resolving, setResolving] = useState<string | null>(null);
+  const [auditing, setAuditing] = useState<string | null>(null);
+  const [savingsInput, setSavingsInput] = useState<Record<string, string>>({});
+  const [auditNotes, setAuditNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -112,6 +111,10 @@ export default function OrgDashboard() {
               created_at,
               engineer_id,
               agreed_metric,
+              status,
+              submission_notes,
+              verified_monthly_savings,
+              audit_notes,
               findings (
                 id, title, category, description,
                 estimated_earnings, estimated_impact,
@@ -146,11 +149,11 @@ export default function OrgDashboard() {
     try {
       const { error: ackError } = await supabase
         .from("claims")
-        .update({ org_acknowledged: true })
+        .update({ org_acknowledged: true, status: "acknowledged" })
         .eq("id", claimId);
       if (ackError) throw ackError;
       setClaims((prev) =>
-        prev.map((c) => c.id === claimId ? { ...c, org_acknowledged: true } : c)
+        prev.map((c) => c.id === claimId ? { ...c, org_acknowledged: true, status: "acknowledged" } : c)
       );
     } catch (err: any) {
       setError(err.message);
@@ -159,15 +162,31 @@ export default function OrgDashboard() {
     }
   }
 
-  async function handleResolve(claimId: string, findingId: string) {
-    setResolving(claimId);
+  async function handleVerify(claimId: string, findingId: string) {
+    const savings = parseInt(savingsInput[claimId] ?? "0");
+    if (!savings || savings <= 0) {
+      setError("Please enter the verified monthly savings amount.");
+      return;
+    }
+    setAuditing(claimId);
     setError("");
     try {
-      const { error: resolveError } = await supabase
+      const { error: claimErr } = await supabase
+        .from("claims")
+        .update({
+          status: "verified",
+          verified_monthly_savings: savings,
+          audit_notes: auditNotes[claimId] ?? "",
+          verified_at: new Date().toISOString(),
+        })
+        .eq("id", claimId);
+
+      if (claimErr) throw claimErr;
+
+      await supabase
         .from("findings")
         .update({ status: "resolved" })
         .eq("id", findingId);
-      if (resolveError) throw resolveError;
 
       setFindings((prev) =>
         prev.map((f) => f.id === findingId ? { ...f, status: "resolved" } : f)
@@ -175,14 +194,14 @@ export default function OrgDashboard() {
       setClaims((prev) =>
         prev.map((c) =>
           c.id === claimId
-            ? { ...c, findings: { ...c.findings, status: "resolved" } }
+            ? { ...c, status: "verified", verified_monthly_savings: savings, findings: { ...c.findings, status: "resolved" } }
             : c
         )
       );
     } catch (err: any) {
       setError(err.message);
     } finally {
-      setResolving(null);
+      setAuditing(null);
     }
   }
 
@@ -221,6 +240,10 @@ export default function OrgDashboard() {
   const acknowledgedClaims = claims.filter((c) => c.org_acknowledged && c.findings.status !== "resolved");
   const resolvedClaims = claims.filter((c) => c.findings.status === "resolved");
 
+  const totalMonthlyPayout = resolvedClaims.reduce((sum, c) => {
+    return sum + Math.round((c.verified_monthly_savings ?? 0) * 0.2);
+  }, 0);
+
   return (
     <main className="min-h-screen bg-gray-950 text-white px-6 py-12">
       <div className="max-w-3xl mx-auto">
@@ -246,10 +269,10 @@ export default function OrgDashboard() {
         )}
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4 mb-10">
+        <div className="grid grid-cols-4 gap-4 mb-10">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-violet-400">{openFindings.length}</div>
-            <div className="text-gray-400 text-xs mt-1">Open Findings</div>
+            <div className="text-gray-400 text-xs mt-1">Open</div>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-yellow-400">{claimedFindings.length}</div>
@@ -259,6 +282,10 @@ export default function OrgDashboard() {
             <div className="text-2xl font-bold text-green-400">{resolvedFindings.length}</div>
             <div className="text-gray-400 text-xs mt-1">Resolved</div>
           </div>
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
+            <div className="text-2xl font-bold text-violet-400">₹{totalMonthlyPayout}</div>
+            <div className="text-gray-400 text-xs mt-1">Paying/mo</div>
+          </div>
         </div>
 
         {/* Pending Acknowledgements */}
@@ -266,58 +293,55 @@ export default function OrgDashboard() {
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-yellow-400">⏳ Pending Acknowledgement ({pendingClaims.length})</h2>
             <p className="text-gray-500 text-sm mb-4">
-              An engineer has claimed a finding. Acknowledge to unlock full details and begin work. By acknowledging, you agree to compensate the engineer based on verified impact.
+              An engineer has claimed a finding. Acknowledge to unlock full details. By acknowledging, you agree to compensate based on your verified audit.
             </p>
             <div className="space-y-4">
-              {pendingClaims.map((c) => {
-                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
-                return (
-                  <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
-                    <div className="flex items-start justify-between gap-4 mb-4">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                            {c.findings.category}
-                          </span>
-                          <span className={`text-xs ${DIFFICULTY_COLORS[c.findings.difficulty] ?? "text-gray-400"}`}>
-                            {c.findings.difficulty}
-                          </span>
-                        </div>
-                        <h3 className="text-white font-semibold">{c.findings.title}</h3>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
-                        <div className="text-gray-500 text-xs">Engineer: ${engineerCut} · Platform: ${platformFee}</div>
-                      </div>
-                    </div>
-
-                    {/* Staged reveal — blurred */}
-                    <div className="relative mb-4">
-                      <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
-                        {c.findings.description}
-                      </div>
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-xs text-gray-400 bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
-                          🔒 Acknowledge to reveal full details
+              {pendingClaims.map((c) => (
+                <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                          {c.findings.category}
+                        </span>
+                        <span className={`text-xs ${DIFFICULTY_COLORS[c.findings.difficulty] ?? "text-gray-400"}`}>
+                          {c.findings.difficulty}
                         </span>
                       </div>
+                      <h3 className="text-white font-semibold">{c.findings.title}</h3>
                     </div>
-
-                    <div className="flex items-center justify-between">
-                      <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
-                        View Engineer: {c.profiles?.name}
-                      </Link>
-                      <button
-                        onClick={() => handleAcknowledge(c.id)}
-                        disabled={acknowledging === c.id}
-                        className="bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
-                      >
-                        {acknowledging === c.id ? "Acknowledging..." : "Acknowledge Claim"}
-                      </button>
+                    <div className="text-right shrink-0 text-xs text-gray-500">
+                      Est. impact<br/>
+                      <span className="text-violet-400 font-bold text-sm">{c.findings.estimated_earnings}/mo</span>
                     </div>
                   </div>
-                );
-              })}
+
+                  {/* Staged reveal — blurred */}
+                  <div className="relative mb-4">
+                    <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
+                      {c.findings.description}
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-xs text-gray-400 bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
+                        🔒 Acknowledge to reveal full details
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
+                      View Engineer: {c.profiles?.name}
+                    </Link>
+                    <button
+                      onClick={() => handleAcknowledge(c.id)}
+                      disabled={acknowledging === c.id}
+                      className="bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                    >
+                      {acknowledging === c.id ? "Acknowledging..." : "Acknowledge Claim"}
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -327,72 +351,133 @@ export default function OrgDashboard() {
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-green-400">✓ Acknowledged & In Progress ({acknowledgedClaims.length})</h2>
             <div className="space-y-4">
-              {acknowledgedClaims.map((c) => {
-                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
-                return (
-                  <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-6">
-                    <div className="flex items-start justify-between gap-4 mb-3">
-                      <div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                          {c.findings.category}
-                        </span>
-                        <h3 className="text-white font-semibold mt-1">{c.findings.title}</h3>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
-                        <div className="text-gray-500 text-xs">Engineer: ${engineerCut} · Platform: ${platformFee}</div>
-                      </div>
+              {acknowledgedClaims.map((c) => (
+                <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-6">
+                  <div className="flex items-start justify-between gap-4 mb-3">
+                    <div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                        {c.findings.category}
+                      </span>
+                      <h3 className="text-white font-semibold mt-1">{c.findings.title}</h3>
                     </div>
-                    <p className="text-gray-400 text-sm mb-2">{c.findings.description}</p>
-                    <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
-                      📈 <span className="text-white font-medium">Impact:</span> {c.findings.estimated_impact}
-                    </div>
-                    {c.agreed_metric && (
-                      <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
-                        📊 <span className="text-white font-medium">Agreed metric:</span> {c.agreed_metric}
-                      </div>
-                    )}
-                    <p className="text-gray-600 text-xs font-mono mb-4">{c.findings.file}</p>
-                    <div className="flex items-center justify-between">
-                      <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
-                        Engineer: {c.profiles?.name} →
-                      </Link>
-                      <button
-                        onClick={() => handleResolve(c.id, c.findings.id)}
-                        disabled={resolving === c.id}
-                        className="bg-green-700 hover:bg-green-600 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
-                      >
-                        {resolving === c.id ? "Resolving..." : "✓ Mark as Resolved"}
-                      </button>
+                    <div className="shrink-0 text-right">
+                      {c.status === "submitted" ? (
+                        <span className="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">📋 Fix Submitted</span>
+                      ) : (
+                        <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">🔨 In Progress</span>
+                      )}
                     </div>
                   </div>
-                );
-              })}
+
+                  <p className="text-gray-400 text-sm mb-2">{c.findings.description}</p>
+
+                  <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
+                    📈 <span className="text-white font-medium">Impact:</span> {c.findings.estimated_impact}
+                  </div>
+
+                  {c.agreed_metric && (
+                    <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
+                      📊 <span className="text-white font-medium">Agreed metric:</span> {c.agreed_metric}
+                    </div>
+                  )}
+
+                  {c.submission_notes && (
+                    <div className="bg-blue-900/30 border border-blue-700 rounded-xl px-4 py-3 text-sm text-blue-200 mb-4">
+                      🔧 <span className="text-white font-medium">Engineer's fix:</span> {c.submission_notes}
+                    </div>
+                  )}
+
+                  <p className="text-gray-600 text-xs font-mono mb-4">{c.findings.file}</p>
+
+                  <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline block mb-4">
+                    Engineer: {c.profiles?.name} →
+                  </Link>
+
+                  {/* Audit panel — only show if fix has been submitted */}
+                  {c.status === "submitted" && (
+                    <div className="border-t border-gray-700 pt-4 space-y-3">
+                      <p className="text-sm text-white font-medium">Declare Verified Savings</p>
+                      <p className="text-xs text-gray-500">
+                        Audit the impact of this fix over an agreed window, then declare the verified monthly savings. The engineer earns 20% of this amount monthly.
+                      </p>
+                      <div className="flex gap-3">
+                        <div className="flex-1">
+                          <label className="text-xs text-gray-500 mb-1 block">Verified monthly savings (₹)</label>
+                          <input
+                            type="number"
+                            value={savingsInput[c.id] ?? ""}
+                            onChange={(e) => setSavingsInput(prev => ({ ...prev, [c.id]: e.target.value }))}
+                            placeholder="e.g. 2000"
+                            className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-xs text-gray-500 mb-1 block">Engineer earns (20%)</label>
+                          <div className="bg-gray-800 border border-green-700 rounded-xl px-3 py-2 text-sm text-green-400 font-bold">
+                            ₹{Math.round((parseInt(savingsInput[c.id] ?? "0") || 0) * 0.2)}/mo
+                          </div>
+                        </div>
+                      </div>
+                      <textarea
+                        value={auditNotes[c.id] ?? ""}
+                        onChange={(e) => setAuditNotes(prev => ({ ...prev, [c.id]: e.target.value }))}
+                        placeholder="How did you measure this? e.g. Compared cloud billing before and after over 30 days. Server costs dropped from ₹10,000 to ₹8,000."
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
+                        rows={2}
+                      />
+                      <button
+                        onClick={() => handleVerify(c.id, c.findings.id)}
+                        disabled={auditing === c.id}
+                        className="w-full bg-green-700 hover:bg-green-600 disabled:opacity-50 py-2 rounded-xl text-sm font-semibold transition"
+                      >
+                        {auditing === c.id ? "Verifying..." : "✓ Declare Savings & Verify Fix"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Waiting for engineer to submit */}
+                  {c.status === "acknowledged" && (
+                    <div className="border-t border-gray-700 pt-4">
+                      <p className="text-xs text-gray-500">
+                        Waiting for engineer to submit their fix. The audit panel will appear once they submit.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Resolved */}
+        {/* Resolved & Paying */}
         {resolvedClaims.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-violet-400">💰 Resolved & Paying ({resolvedClaims.length})</h2>
             <div className="space-y-3">
               {resolvedClaims.map((c) => {
-                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
+                const engineerMonthly = Math.round((c.verified_monthly_savings ?? 0) * 0.2);
+                const platformMonthly = Math.round((c.verified_monthly_savings ?? 0) * 0.05);
                 return (
-                  <div key={c.id} className="bg-gray-900 border border-violet-800 rounded-2xl p-5 flex items-center justify-between">
-                    <div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                        {c.findings.category}
-                      </span>
-                      <h3 className="text-white font-medium mt-1">{c.findings.title}</h3>
-                      <p className="text-gray-500 text-xs mt-0.5">Engineer: {c.profiles?.name}</p>
+                  <div key={c.id} className="bg-gray-900 border border-violet-800 rounded-2xl p-5">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                          {c.findings.category}
+                        </span>
+                        <h3 className="text-white font-medium mt-1">{c.findings.title}</h3>
+                        <p className="text-gray-500 text-xs mt-0.5">Engineer: {c.profiles?.name}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-green-400 font-bold">₹{c.verified_monthly_savings}/mo saved</div>
+                        <div className="text-gray-500 text-xs">Eng: ₹{engineerMonthly} · Platform: ₹{platformMonthly}</div>
+                        <span className="text-xs text-green-400">● Verified & Active</span>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
-                      <div className="text-gray-500 text-xs">Eng: ${engineerCut} · Platform: ${platformFee}</div>
-                      <span className="text-xs text-green-400">● Active</span>
-                    </div>
+                    {c.audit_notes && (
+                      <div className="bg-gray-800 rounded-xl px-3 py-2 text-xs text-gray-400">
+                        🔍 {c.audit_notes}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -423,8 +508,8 @@ export default function OrgDashboard() {
                     <h3 className="text-white font-medium">{f.title}</h3>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="text-violet-400 font-bold">{f.estimated_earnings}/mo</div>
-                    <div className={`text-xs mt-0.5 ${
+                    <div className="text-gray-500 text-xs">Est. {f.estimated_earnings}/mo</div>
+                    <div className={`text-xs mt-0.5 font-medium ${
                       f.status === "open" ? "text-gray-500" :
                       f.status === "claimed" ? "text-yellow-400" :
                       "text-green-400"

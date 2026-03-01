@@ -31,19 +31,17 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   Hard: "text-red-400",
 };
 
-function engineerCut(earnings: string) {
-  const num = parseInt(earnings.replace(/\D/g, "")) || 0;
-  return Math.round(num * 0.8);
-}
-
 export default function DashboardPage() {
   const router = useRouter();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<string | null>(null);
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [claimStatuses, setClaimStatuses] = useState<Record<string, string>>({});
   const [metrics, setMetrics] = useState<Record<string, string>>({});
+  const [submissionNotes, setSubmissionNotes] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -64,10 +62,15 @@ export default function DashboardPage() {
 
       const { data: myClaims } = await supabase
         .from("claims")
-        .select("finding_id")
+        .select("finding_id, status")
         .eq("engineer_id", user.id);
 
-      if (myClaims) setClaimedIds(myClaims.map((c) => c.finding_id));
+      if (myClaims) {
+        setClaimedIds(myClaims.map((c: any) => c.finding_id));
+        const statusMap: Record<string, string> = {};
+        myClaims.forEach((c: any) => { statusMap[c.finding_id] = c.status; });
+        setClaimStatuses(statusMap);
+      }
 
       const { data: openFindings } = await supabase
         .from("findings")
@@ -92,7 +95,6 @@ export default function DashboardPage() {
       setError("Please describe the metric you will measure before claiming.");
       return;
     }
-
     setClaiming(findingId);
     setError("");
     try {
@@ -104,6 +106,7 @@ export default function DashboardPage() {
         engineer_id: user.id,
         org_acknowledged: false,
         agreed_metric: metric.trim(),
+        status: "pending",
       });
 
       if (claimError) throw claimError;
@@ -114,6 +117,7 @@ export default function DashboardPage() {
         .eq("id", findingId);
 
       setClaimedIds((prev) => [...prev, findingId]);
+      setClaimStatuses((prev) => ({ ...prev, [findingId]: "pending" }));
       setFindings((prev) =>
         prev.map((f) => f.id === findingId ? { ...f, status: "claimed" } : f)
       );
@@ -121,6 +125,33 @@ export default function DashboardPage() {
       setError(err.message);
     } finally {
       setClaiming(null);
+    }
+  }
+
+  async function handleSubmit(findingId: string) {
+    const notes = submissionNotes[findingId];
+    if (!notes?.trim()) {
+      setError("Please describe what you fixed before submitting.");
+      return;
+    }
+    setSubmitting(findingId);
+    setError("");
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const { error } = await supabase
+        .from("claims")
+        .update({ status: "submitted", submission_notes: notes.trim() })
+        .eq("finding_id", findingId)
+        .eq("engineer_id", user.id);
+
+      if (error) throw error;
+      setClaimStatuses(prev => ({ ...prev, [findingId]: "submitted" }));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSubmitting(null);
     }
   }
 
@@ -178,12 +209,12 @@ export default function DashboardPage() {
             </h2>
             {findings.map((f) => {
               const isClaimed = claimedIds.includes(f.id);
-              const cut = engineerCut(f.estimated_earnings);
+              const claimStatus = claimStatuses[f.id];
               return (
                 <div
                   key={f.id}
                   className={`bg-gray-900 border rounded-2xl p-6 transition ${
-                    isClaimed ? "border-violet-700 opacity-75" : "border-gray-800 hover:border-violet-700"
+                    isClaimed ? "border-violet-700" : "border-gray-800 hover:border-violet-700"
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
@@ -201,9 +232,9 @@ export default function DashboardPage() {
                   <div className="flex items-start justify-between gap-4 mb-3">
                     <h3 className="text-white font-semibold text-lg">{f.title}</h3>
                     <div className="text-right shrink-0">
-                      <div className="text-violet-400 font-bold text-lg">{f.estimated_earnings}</div>
-                      <div className="text-gray-500 text-xs">/ month total</div>
-                      <div className="text-green-400 text-xs font-medium">You earn: ${cut}/mo</div>
+                      <div className="text-gray-400 text-xs">Est. impact</div>
+                      <div className="text-violet-400 font-bold text-sm">{f.estimated_earnings}/mo</div>
+                      <div className="text-gray-600 text-xs">Actual pay set by org audit</div>
                     </div>
                   </div>
 
@@ -213,35 +244,95 @@ export default function DashboardPage() {
                     📈 <span className="text-white font-medium">Impact:</span> {f.estimated_impact}
                   </div>
 
+                  {/* Not yet claimed */}
                   {!isClaimed && (
-                    <div className="mb-4">
-                      <label className="block text-xs text-gray-400 mb-1">
-                        What metric will you measure to prove impact? <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={metrics[f.id] ?? ""}
-                        onChange={(e) => setMetrics(prev => ({ ...prev, [f.id]: e.target.value }))}
-                        placeholder="e.g. API response time drops from 800ms to under 200ms"
-                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                      />
+                    <>
+                      <div className="mb-4">
+                        <label className="block text-xs text-gray-400 mb-1">
+                          What metric will you measure to prove impact? <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={metrics[f.id] ?? ""}
+                          onChange={(e) => setMetrics(prev => ({ ...prev, [f.id]: e.target.value }))}
+                          placeholder="e.g. API response time drops from 800ms to under 200ms"
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600 text-xs font-mono truncate max-w-xs">{f.file}</span>
+                        <button
+                          onClick={() => handleClaim(f.id)}
+                          disabled={claiming === f.id}
+                          className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                        >
+                          {claiming === f.id ? "Claiming..." : "Claim This"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Claimed — awaiting org acknowledgement */}
+                  {isClaimed && claimStatus === "pending" && (
+                    <div className="border-t border-gray-800 pt-4 space-y-3">
+                      <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded-full">
+                        ⏳ Awaiting Org Acknowledgement
+                      </span>
+                      <p className="text-gray-500 text-xs">
+                        Once the org acknowledges your claim, you can begin work and submit your fix.
+                      </p>
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between">
-                    <span className="text-gray-600 text-xs font-mono truncate max-w-xs">{f.file}</span>
-                    {isClaimed ? (
-                      <span className="text-violet-400 text-sm font-semibold">✓ Claimed — Awaiting Org</span>
-                    ) : (
+                  {/* Acknowledged — ready to submit fix */}
+                  {isClaimed && claimStatus === "acknowledged" && (
+                    <div className="border-t border-gray-800 pt-4 space-y-3">
+                      <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
+                        ✓ Org Acknowledged — Submit your fix when ready
+                      </span>
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">
+                          Describe what you fixed <span className="text-red-400">*</span>
+                        </label>
+                        <textarea
+                          value={submissionNotes[f.id] ?? ""}
+                          onChange={(e) => setSubmissionNotes(prev => ({ ...prev, [f.id]: e.target.value }))}
+                          placeholder="e.g. Replaced N+1 query with a single JOIN, reducing DB calls from 200 to 1 per request. PR #42 merged."
+                          className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 resize-none"
+                          rows={3}
+                        />
+                      </div>
                       <button
-                        onClick={() => handleClaim(f.id)}
-                        disabled={claiming === f.id}
-                        className="bg-violet-700 hover:bg-violet-600 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                        onClick={() => handleSubmit(f.id)}
+                        disabled={submitting === f.id}
+                        className="bg-blue-700 hover:bg-blue-600 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
                       >
-                        {claiming === f.id ? "Claiming..." : "Claim This"}
+                        {submitting === f.id ? "Submitting..." : "Submit Fix for Audit →"}
                       </button>
-                    )}
-                  </div>
+                    </div>
+                  )}
+
+                  {/* Submitted — awaiting audit */}
+                  {isClaimed && claimStatus === "submitted" && (
+                    <div className="border-t border-gray-800 pt-4">
+                      <span className="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded-full">
+                        📋 Fix Submitted — Awaiting Org Audit
+                      </span>
+                      <p className="text-gray-500 text-xs mt-2">
+                        The org will audit your fix and declare the verified monthly savings. Your revenue share will be calculated from their declared amount.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Verified — earning */}
+                  {isClaimed && claimStatus === "verified" && (
+                    <div className="border-t border-gray-800 pt-4">
+                      <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
+                        ✓ Verified — Check your profile for earnings
+                      </span>
+                    </div>
+                  )}
+
                 </div>
               );
             })}
