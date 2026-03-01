@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabase";
 type Claim = {
   id: string;
   org_acknowledged: boolean;
+  agreed_metric?: string;
   created_at: string;
   findings: {
     id: string;
@@ -35,6 +36,11 @@ const CATEGORY_COLORS: Record<string, string> = {
   "Code Quality": "bg-green-100 text-green-700",
 };
 
+function engineerCut(earnings: string) {
+  const num = parseInt(earnings.replace(/\D/g, "")) || 0;
+  return Math.round(num * 0.8);
+}
+
 export default function ProfilePage() {
   const { id } = useParams();
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -47,12 +53,13 @@ export default function ProfilePage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user?.id === id) setIsOwner(true);
 
-      const { data: prof } = await supabase
+      const { data: profiles } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", id)
-        .single();
+        .limit(1);
 
+      const prof = profiles?.[0] ?? null;
       if (!prof) { setLoading(false); return; }
       setProfile(prof);
 
@@ -61,6 +68,7 @@ export default function ProfilePage() {
         .select(`
           id,
           org_acknowledged,
+          agreed_metric,
           created_at,
           findings (
             id, title, category, estimated_earnings,
@@ -96,9 +104,8 @@ export default function ProfilePage() {
   const activeClaims = claims.filter((c) => c.findings.status === "claimed");
   const resolved = claims.filter((c) => c.findings.status === "resolved");
 
-  const totalEarnings = resolved.reduce((sum, c) => {
-    const num = parseInt(c.findings.estimated_earnings.replace(/\D/g, "")) || 0;
-    return sum + num;
+  const totalMonthlyEarnings = resolved.reduce((sum, c) => {
+    return sum + engineerCut(c.findings.estimated_earnings);
   }, 0);
 
   return (
@@ -139,11 +146,17 @@ export default function ProfilePage() {
             </div>
             <div className="bg-gray-800 rounded-xl p-4 text-center">
               <div className="text-2xl font-bold text-yellow-400">
-                {totalEarnings > 0 ? `$${totalEarnings}` : "$0"}
+                {totalMonthlyEarnings > 0 ? `$${totalMonthlyEarnings}` : "$0"}
               </div>
-              <div className="text-gray-400 text-xs mt-1">Monthly Earning</div>
+              <div className="text-gray-400 text-xs mt-1">Monthly Royalties</div>
             </div>
           </div>
+
+          {totalMonthlyEarnings > 0 && (
+            <div className="mt-4 bg-violet-900/30 border border-violet-700 rounded-xl px-4 py-3 text-sm text-violet-300 text-center">
+              💰 Earning <span className="font-bold text-violet-200">${totalMonthlyEarnings}/month</span> passively from {resolved.length} resolved {resolved.length === 1 ? "fix" : "fixes"}
+            </div>
+          )}
         </div>
 
         {/* Active Claims */}
@@ -155,63 +168,96 @@ export default function ProfilePage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {activeClaims.map((c) => (
-                <div key={c.id} className="bg-gray-900 border border-violet-800 rounded-2xl p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                        {c.findings.category}
-                      </span>
-                      <h3 className="font-semibold text-white mt-1">{c.findings.title}</h3>
-                      <p className="text-gray-500 text-xs mt-0.5">🏢 {c.findings.orgs?.name}</p>
+              {activeClaims.map((c) => {
+                const cut = engineerCut(c.findings.estimated_earnings);
+                return (
+                  <div key={c.id} className="bg-gray-900 border border-violet-800 rounded-2xl p-5">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                          {c.findings.category}
+                        </span>
+                        <h3 className="font-semibold text-white mt-1">{c.findings.title}</h3>
+                        <p className="text-gray-500 text-xs mt-0.5">🏢 {c.findings.orgs?.name}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-violet-400 font-bold">${cut}/mo</div>
+                        <div className="text-gray-600 text-xs">your cut</div>
+                      </div>
                     </div>
-                    <span className="text-violet-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
-                  </div>
-                  <p className="text-gray-500 text-xs font-mono mb-3">{c.findings.file}</p>
-                  <div className="flex items-center gap-2">
-                    {c.org_acknowledged ? (
-                      <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
-                        ✓ Org Acknowledged — In Progress
-                      </span>
-                    ) : (
-                      <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded-full">
-                        ⏳ Awaiting Org Acknowledgement
-                      </span>
+
+                    {c.agreed_metric && (
+                      <div className="bg-gray-800 rounded-xl px-3 py-2 text-xs text-gray-300 mb-3">
+                        📊 <span className="text-white font-medium">Measuring:</span> {c.agreed_metric}
+                      </div>
                     )}
+
+                    <p className="text-gray-500 text-xs font-mono mb-3">{c.findings.file}</p>
+
+                    <div className="flex items-center gap-2">
+                      {c.org_acknowledged ? (
+                        <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
+                          ✓ Org Acknowledged — In Progress
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-0.5 rounded-full">
+                          ⏳ Awaiting Org Acknowledgement
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
 
-        {/* Resolved */}
+        {/* Resolved & Earning */}
         <div>
           <h2 className="text-lg font-semibold mb-3 text-gray-200">Resolved & Earning</h2>
           {resolved.length === 0 ? (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-gray-500 text-sm text-center">
-              No resolved findings yet. This is where your verified impact will show.
+              No resolved findings yet. This is where your verified impact and royalties will show.
             </div>
           ) : (
             <div className="space-y-3">
-              {resolved.map((c) => (
-                <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-5">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                        {c.findings.category}
-                      </span>
-                      <h3 className="font-semibold text-white mt-1">{c.findings.title}</h3>
-                      <p className="text-gray-500 text-xs mt-0.5">🏢 {c.findings.orgs?.name}</p>
+              {resolved.map((c) => {
+                const cut = engineerCut(c.findings.estimated_earnings);
+                return (
+                  <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-5">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full mr-2 ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                          {c.findings.category}
+                        </span>
+                        <h3 className="font-semibold text-white mt-1">{c.findings.title}</h3>
+                        <p className="text-gray-500 text-xs mt-0.5">🏢 {c.findings.orgs?.name}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-green-400 font-bold">${cut}/mo</div>
+                        <div className="text-gray-600 text-xs">your royalty</div>
+                      </div>
                     </div>
-                    <span className="text-green-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
+
+                    {c.agreed_metric && (
+                      <div className="bg-gray-800 rounded-xl px-3 py-2 text-xs text-gray-300 mb-3">
+                        📊 <span className="text-white font-medium">Verified metric:</span> {c.agreed_metric}
+                      </div>
+                    )}
+
+                    <p className="text-gray-500 text-xs font-mono mb-3">{c.findings.file}</p>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
+                        ✓ Verified & Earning
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        Paying since {new Date(c.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-gray-500 text-xs font-mono mb-3">{c.findings.file}</p>
-                  <span className="text-xs bg-green-900 text-green-300 px-2 py-0.5 rounded-full">
-                    ✓ Verified & Earning
-                  </span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

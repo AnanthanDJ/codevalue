@@ -10,6 +10,7 @@ type Claim = {
   org_acknowledged: boolean;
   created_at: string;
   engineer_id: string;
+  agreed_metric?: string;
   findings: {
     id: string;
     title: string;
@@ -49,14 +50,21 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   Hard: "text-red-400",
 };
 
+function platformCut(earnings: string) {
+  const num = parseInt(earnings.replace(/\D/g, "")) || 0;
+  const engineerCut = Math.round(num * 0.8);
+  const platformFee = Math.round(num * 0.2);
+  return { engineerCut, platformFee };
+}
+
 export default function OrgDashboard() {
   const router = useRouter();
   const [org, setOrg] = useState<any>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [loading, setLoading] = useState(true);
-  const [debugInfo, setDebugInfo] = useState<string>("");
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -65,7 +73,6 @@ export default function OrgDashboard() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { router.push("/login"); return; }
 
-        // Check profile
         const { data: profiles } = await supabase
           .from("profiles")
           .select("*")
@@ -73,12 +80,9 @@ export default function OrgDashboard() {
           .limit(1);
 
         const profile = profiles?.[0] ?? null;
-        setDebugInfo(`User: ${user.id} | Role: ${profile?.role}`);
-
         if (!profile) { setLoading(false); return; }
         if (profile.role !== "org") { router.push("/dashboard"); return; }
 
-        // Get org
         const { data: orgs } = await supabase
           .from("orgs")
           .select("*")
@@ -87,22 +91,17 @@ export default function OrgDashboard() {
           .limit(1);
 
         const orgRow = orgs?.[0] ?? null;
-        setDebugInfo(prev => prev + ` | Org: ${orgRow?.id ?? "null"}`);
-
         if (!orgRow) { setLoading(false); return; }
         setOrg(orgRow);
 
-        // Get findings
         const { data: findingsData } = await supabase
           .from("findings")
           .select("*")
           .eq("org_id", orgRow.id)
           .order("created_at", { ascending: false });
 
-        setDebugInfo(prev => prev + ` | Findings: ${findingsData?.length ?? 0}`);
         setFindings(findingsData ?? []);
 
-        // Get claims
         const ids = (findingsData ?? []).map((f: any) => f.id);
         if (ids.length > 0) {
           const { data: claimsData } = await supabase
@@ -112,6 +111,7 @@ export default function OrgDashboard() {
               org_acknowledged,
               created_at,
               engineer_id,
+              agreed_metric,
               findings (
                 id, title, category, description,
                 estimated_earnings, estimated_impact,
@@ -124,11 +124,10 @@ export default function OrgDashboard() {
             .in("finding_id", ids)
             .order("created_at", { ascending: false });
 
-          setDebugInfo(prev => prev + ` | Claims: ${claimsData?.length ?? 0}`);
           setClaims((claimsData as any) ?? []);
         }
       } catch (err: any) {
-        setDebugInfo(prev => prev + ` | ERROR: ${err.message}`);
+        setError(err.message);
       } finally {
         setLoading(false);
       }
@@ -160,6 +159,33 @@ export default function OrgDashboard() {
     }
   }
 
+  async function handleResolve(claimId: string, findingId: string) {
+    setResolving(claimId);
+    setError("");
+    try {
+      const { error: resolveError } = await supabase
+        .from("findings")
+        .update({ status: "resolved" })
+        .eq("id", findingId);
+      if (resolveError) throw resolveError;
+
+      setFindings((prev) =>
+        prev.map((f) => f.id === findingId ? { ...f, status: "resolved" } : f)
+      );
+      setClaims((prev) =>
+        prev.map((c) =>
+          c.id === claimId
+            ? { ...c, findings: { ...c.findings, status: "resolved" } }
+            : c
+        )
+      );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setResolving(null);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -174,8 +200,9 @@ export default function OrgDashboard() {
         <div className="text-center max-w-md">
           <div className="text-5xl mb-4">🏢</div>
           <h2 className="text-2xl font-bold mb-2">No repo connected yet</h2>
-          <p className="text-gray-400 text-sm mb-4">Connect your repository to get started.</p>
-          <p className="text-gray-600 text-xs mb-8 font-mono break-all">{debugInfo}</p>
+          <p className="text-gray-400 text-sm mb-8">
+            Connect your repository to start finding inefficiencies your team never knew existed.
+          </p>
           <div className="flex items-center justify-center gap-4">
             <button onClick={handleLogout} className="text-gray-500 text-sm underline">Log out</button>
             <Link href="/org/onboard" className="bg-violet-600 hover:bg-violet-500 px-6 py-3 rounded-xl text-sm font-semibold transition">
@@ -191,7 +218,8 @@ export default function OrgDashboard() {
   const claimedFindings = findings.filter((f) => f.status === "claimed");
   const resolvedFindings = findings.filter((f) => f.status === "resolved");
   const pendingClaims = claims.filter((c) => !c.org_acknowledged);
-  const acknowledgedClaims = claims.filter((c) => c.org_acknowledged);
+  const acknowledgedClaims = claims.filter((c) => c.org_acknowledged && c.findings.status !== "resolved");
+  const resolvedClaims = claims.filter((c) => c.findings.status === "resolved");
 
   return (
     <main className="min-h-screen bg-gray-950 text-white px-6 py-12">
@@ -217,6 +245,7 @@ export default function OrgDashboard() {
           <div className="bg-red-900 border border-red-700 rounded-xl px-4 py-3 text-sm text-red-300 mb-6">{error}</div>
         )}
 
+        {/* Stats */}
         <div className="grid grid-cols-3 gap-4 mb-10">
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-violet-400">{openFindings.length}</div>
@@ -224,7 +253,7 @@ export default function OrgDashboard() {
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-yellow-400">{claimedFindings.length}</div>
-            <div className="text-gray-400 text-xs mt-1">Claimed</div>
+            <div className="text-gray-400 text-xs mt-1">In Progress</div>
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 text-center">
             <div className="text-2xl font-bold text-green-400">{resolvedFindings.length}</div>
@@ -232,89 +261,151 @@ export default function OrgDashboard() {
           </div>
         </div>
 
+        {/* Pending Acknowledgements */}
         {pendingClaims.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-yellow-400">⏳ Pending Acknowledgement ({pendingClaims.length})</h2>
-            <p className="text-gray-500 text-sm mb-4">An engineer has claimed a finding. Acknowledge to unlock full details.</p>
+            <p className="text-gray-500 text-sm mb-4">
+              An engineer has claimed a finding. Acknowledge to unlock full details and begin work. By acknowledging, you agree to compensate the engineer based on verified impact.
+            </p>
             <div className="space-y-4">
-              {pendingClaims.map((c) => (
-                <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
-                  <div className="flex items-start justify-between gap-4 mb-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                          {c.findings.category}
-                        </span>
-                        <span className={`text-xs ${DIFFICULTY_COLORS[c.findings.difficulty] ?? "text-gray-400"}`}>
-                          {c.findings.difficulty}
+              {pendingClaims.map((c) => {
+                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
+                return (
+                  <div key={c.id} className="bg-gray-900 border border-yellow-700 rounded-2xl p-6">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                            {c.findings.category}
+                          </span>
+                          <span className={`text-xs ${DIFFICULTY_COLORS[c.findings.difficulty] ?? "text-gray-400"}`}>
+                            {c.findings.difficulty}
+                          </span>
+                        </div>
+                        <h3 className="text-white font-semibold">{c.findings.title}</h3>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
+                        <div className="text-gray-500 text-xs">Engineer: ${engineerCut} · Platform: ${platformFee}</div>
+                      </div>
+                    </div>
+
+                    {/* Staged reveal — blurred */}
+                    <div className="relative mb-4">
+                      <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
+                        {c.findings.description}
+                      </div>
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-xs text-gray-400 bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
+                          🔒 Acknowledge to reveal full details
                         </span>
                       </div>
-                      <h3 className="text-white font-semibold">{c.findings.title}</h3>
                     </div>
-                    <span className="text-violet-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
-                  </div>
-                  <div className="relative mb-4">
-                    <div className="bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-300 blur-sm select-none">
-                      {c.findings.description}
+
+                    <div className="flex items-center justify-between">
+                      <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
+                        View Engineer: {c.profiles?.name}
+                      </Link>
+                      <button
+                        onClick={() => handleAcknowledge(c.id)}
+                        disabled={acknowledging === c.id}
+                        className="bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                      >
+                        {acknowledging === c.id ? "Acknowledging..." : "Acknowledge Claim"}
+                      </button>
                     </div>
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <span className="text-xs text-gray-400 bg-gray-900 px-3 py-1 rounded-full border border-gray-700">
-                        🔒 Acknowledge to reveal full details
-                      </span>
-                    </div>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
-                      View Engineer: {c.profiles?.name}
-                    </Link>
-                    <button
-                      onClick={() => handleAcknowledge(c.id)}
-                      disabled={acknowledging === c.id}
-                      className="bg-yellow-600 hover:bg-yellow-500 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
-                    >
-                      {acknowledging === c.id ? "Acknowledging..." : "Acknowledge Claim"}
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
+        {/* Acknowledged & In Progress */}
         {acknowledgedClaims.length > 0 && (
           <div className="mb-10">
             <h2 className="text-lg font-semibold mb-3 text-green-400">✓ Acknowledged & In Progress ({acknowledgedClaims.length})</h2>
             <div className="space-y-4">
-              {acknowledgedClaims.map((c) => (
-                <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-6">
-                  <div className="flex items-start justify-between gap-4 mb-3">
-                    <div>
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
-                        {c.findings.category}
-                      </span>
-                      <h3 className="text-white font-semibold mt-1">{c.findings.title}</h3>
+              {acknowledgedClaims.map((c) => {
+                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
+                return (
+                  <div key={c.id} className="bg-gray-900 border border-green-800 rounded-2xl p-6">
+                    <div className="flex items-start justify-between gap-4 mb-3">
+                      <div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                          {c.findings.category}
+                        </span>
+                        <h3 className="text-white font-semibold mt-1">{c.findings.title}</h3>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
+                        <div className="text-gray-500 text-xs">Engineer: ${engineerCut} · Platform: ${platformFee}</div>
+                      </div>
                     </div>
-                    <span className="text-violet-400 font-bold shrink-0">{c.findings.estimated_earnings}/mo</span>
+                    <p className="text-gray-400 text-sm mb-2">{c.findings.description}</p>
+                    <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
+                      📈 <span className="text-white font-medium">Impact:</span> {c.findings.estimated_impact}
+                    </div>
+                    {c.agreed_metric && (
+                      <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
+                        📊 <span className="text-white font-medium">Agreed metric:</span> {c.agreed_metric}
+                      </div>
+                    )}
+                    <p className="text-gray-600 text-xs font-mono mb-4">{c.findings.file}</p>
+                    <div className="flex items-center justify-between">
+                      <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
+                        Engineer: {c.profiles?.name} →
+                      </Link>
+                      <button
+                        onClick={() => handleResolve(c.id, c.findings.id)}
+                        disabled={resolving === c.id}
+                        className="bg-green-700 hover:bg-green-600 disabled:opacity-50 px-4 py-2 rounded-xl text-sm font-medium transition"
+                      >
+                        {resolving === c.id ? "Resolving..." : "✓ Mark as Resolved"}
+                      </button>
+                    </div>
                   </div>
-                  <p className="text-gray-400 text-sm mb-2">{c.findings.description}</p>
-                  <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-3">
-                    📈 <span className="text-white font-medium">Impact:</span> {c.findings.estimated_impact}
-                  </div>
-                  <p className="text-gray-600 text-xs font-mono mb-3">{c.findings.file}</p>
-                  <Link href={`/profile/${c.profiles?.id}`} className="text-violet-400 text-sm underline">
-                    Engineer: {c.profiles?.name} →
-                  </Link>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
+        {/* Resolved */}
+        {resolvedClaims.length > 0 && (
+          <div className="mb-10">
+            <h2 className="text-lg font-semibold mb-3 text-violet-400">💰 Resolved & Paying ({resolvedClaims.length})</h2>
+            <div className="space-y-3">
+              {resolvedClaims.map((c) => {
+                const { engineerCut, platformFee } = platformCut(c.findings.estimated_earnings);
+                return (
+                  <div key={c.id} className="bg-gray-900 border border-violet-800 rounded-2xl p-5 flex items-center justify-between">
+                    <div>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${CATEGORY_COLORS[c.findings.category] ?? "bg-gray-700 text-gray-300"}`}>
+                        {c.findings.category}
+                      </span>
+                      <h3 className="text-white font-medium mt-1">{c.findings.title}</h3>
+                      <p className="text-gray-500 text-xs mt-0.5">Engineer: {c.profiles?.name}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-violet-400 font-bold">{c.findings.estimated_earnings}/mo</div>
+                      <div className="text-gray-500 text-xs">Eng: ${engineerCut} · Platform: ${platformFee}</div>
+                      <span className="text-xs text-green-400">● Active</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* All Findings */}
         <div>
           <h2 className="text-lg font-semibold mb-3 text-gray-200">All Findings</h2>
           {findings.length === 0 ? (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-6 text-gray-500 text-sm text-center">
-              No findings yet.
+              No findings yet. Connect a repo to generate findings.
             </div>
           ) : (
             <div className="space-y-3">

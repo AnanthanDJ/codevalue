@@ -31,6 +31,11 @@ const DIFFICULTY_COLORS: Record<string, string> = {
   Hard: "text-red-400",
 };
 
+function engineerCut(earnings: string) {
+  const num = parseInt(earnings.replace(/\D/g, "")) || 0;
+  return Math.round(num * 0.8);
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -38,6 +43,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [claiming, setClaiming] = useState<string | null>(null);
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [metrics, setMetrics] = useState<Record<string, string>>({});
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -45,17 +51,17 @@ export default function DashboardPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push("/login"); return; }
 
-      const { data: prof } = await supabase
+      const { data: profiles } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .limit(1);
 
+      const prof = profiles?.[0] ?? null;
       if (!prof) { router.push("/login"); return; }
       if (prof.role === "org") { router.push("/org/dashboard"); return; }
       setProfile(prof);
 
-      // Load existing claims by this engineer
       const { data: myClaims } = await supabase
         .from("claims")
         .select("finding_id")
@@ -63,7 +69,6 @@ export default function DashboardPage() {
 
       if (myClaims) setClaimedIds(myClaims.map((c) => c.finding_id));
 
-      // Load all open findings with org info
       const { data: openFindings } = await supabase
         .from("findings")
         .select("*, orgs(name, repo_url)")
@@ -77,12 +82,17 @@ export default function DashboardPage() {
   }, []);
 
   async function handleLogout() {
-  await supabase.auth.signOut();
-  router.push("/");
-}
-
+    await supabase.auth.signOut();
+    router.push("/");
+  }
 
   async function handleClaim(findingId: string) {
+    const metric = metrics[findingId];
+    if (!metric?.trim()) {
+      setError("Please describe the metric you will measure before claiming.");
+      return;
+    }
+
     setClaiming(findingId);
     setError("");
     try {
@@ -93,6 +103,7 @@ export default function DashboardPage() {
         finding_id: findingId,
         engineer_id: user.id,
         org_acknowledged: false,
+        agreed_metric: metric.trim(),
       });
 
       if (claimError) throw claimError;
@@ -125,28 +136,25 @@ export default function DashboardPage() {
     <main className="min-h-screen bg-gray-950 text-white px-6 py-12">
       <div className="max-w-3xl mx-auto">
 
-        {/* Header */}
         <div className="flex items-center justify-between mb-10">
           <div>
-            <h1 className="text-3xl font-bold">
-              Code<span className="text-violet-400">Value</span>
-            </h1>
-            <p className="text-gray-400 text-sm mt-1">
-              Welcome back, {profile?.name}
-            </p>
+            <h1 className="text-3xl font-bold">Code<span className="text-violet-400">Value</span></h1>
+            <p className="text-gray-400 text-sm mt-1">Welcome back, {profile?.name}</p>
           </div>
-          <Link
-            href={`/profile/${profile?.id}`}
-            className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-sm transition"
-          >
-            My Profile →
-          </Link>
-          <button
-    onClick={handleLogout}
-    className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
-  >
-    Log out
-  </button>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/profile/${profile?.id}`}
+              className="bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-xl text-sm transition"
+            >
+              My Profile →
+            </Link>
+            <button
+              onClick={handleLogout}
+              className="bg-gray-800 hover:bg-red-900 px-4 py-2 rounded-xl text-sm transition text-gray-400 hover:text-red-300"
+            >
+              Log out
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -155,12 +163,13 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* Findings */}
         {findings.length === 0 ? (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-12 text-center text-gray-500">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl p-12 text-center">
             <div className="text-5xl mb-4">🔍</div>
-            <p>No open opportunities right now.</p>
-            <p className="text-sm mt-1">Check back soon as orgs onboard.</p>
+            <h2 className="text-lg font-semibold text-white mb-2">No open opportunities yet</h2>
+            <p className="text-gray-400 text-sm max-w-sm mx-auto">
+              Organisations are being onboarded. The moment a repo is scanned, findings will appear here automatically — no job posting needed.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -169,6 +178,7 @@ export default function DashboardPage() {
             </h2>
             {findings.map((f) => {
               const isClaimed = claimedIds.includes(f.id);
+              const cut = engineerCut(f.estimated_earnings);
               return (
                 <div
                   key={f.id}
@@ -176,8 +186,7 @@ export default function DashboardPage() {
                     isClaimed ? "border-violet-700 opacity-75" : "border-gray-800 hover:border-violet-700"
                   }`}
                 >
-                  {/* Org badge */}
-                  <div className="flex items-center gap-2 mb-3">
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
                     <span className="text-xs text-gray-500 bg-gray-800 px-2 py-0.5 rounded-full">
                       🏢 {f.orgs?.name ?? "Unknown Org"}
                     </span>
@@ -193,7 +202,8 @@ export default function DashboardPage() {
                     <h3 className="text-white font-semibold text-lg">{f.title}</h3>
                     <div className="text-right shrink-0">
                       <div className="text-violet-400 font-bold text-lg">{f.estimated_earnings}</div>
-                      <div className="text-gray-500 text-xs">/ month</div>
+                      <div className="text-gray-500 text-xs">/ month total</div>
+                      <div className="text-green-400 text-xs font-medium">You earn: ${cut}/mo</div>
                     </div>
                   </div>
 
@@ -202,6 +212,21 @@ export default function DashboardPage() {
                   <div className="bg-gray-800 rounded-xl px-4 py-2 text-sm text-gray-300 mb-4">
                     📈 <span className="text-white font-medium">Impact:</span> {f.estimated_impact}
                   </div>
+
+                  {!isClaimed && (
+                    <div className="mb-4">
+                      <label className="block text-xs text-gray-400 mb-1">
+                        What metric will you measure to prove impact? <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={metrics[f.id] ?? ""}
+                        onChange={(e) => setMetrics(prev => ({ ...prev, [f.id]: e.target.value }))}
+                        placeholder="e.g. API response time drops from 800ms to under 200ms"
+                        className="w-full bg-gray-800 border border-gray-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      />
+                    </div>
+                  )}
 
                   <div className="flex items-center justify-between">
                     <span className="text-gray-600 text-xs font-mono truncate max-w-xs">{f.file}</span>
