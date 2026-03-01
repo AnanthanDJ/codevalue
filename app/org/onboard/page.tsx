@@ -59,14 +59,14 @@ export default function OrgOnboardPage() {
 
   return (
     <main className="min-h-screen bg-gray-950 text-white flex items-center justify-center px-6">
-    <Link href="/org/dashboard" className="text-violet-400 text-sm underline mb-6 inline-block">
-  ← Back to Dashboard
-</Link>
       <div className="w-full max-w-lg">
         <div className="mb-8">
           <h1 className="text-3xl font-bold mb-2">
             Code<span className="text-violet-400">Value</span>
           </h1>
+    <Link href="/org/dashboard" className="text-violet-400 text-sm underline mb-6 inline-block">
+  ← Back to Dashboard
+</Link>
           <h2 className="text-xl text-gray-300">Connect your repository</h2>
           <p className="text-gray-500 text-sm mt-1">
             Our AI will scan your codebase and surface inefficiencies. Engineers

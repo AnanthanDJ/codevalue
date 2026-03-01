@@ -39,12 +39,6 @@ export default function LandingPage() {
           >
             Get Started
           </Link>
-          <Link
-            href="/go"
-            className="bg-gray-800 hover:bg-gray-700 px-8 py-3 rounded-xl font-semibold transition"
-          >
-            Sign In
-          </Link>
         </div>
 
       </div>
